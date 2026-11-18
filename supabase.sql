@@ -9,6 +9,11 @@ create table if not exists public.snapshots (
 
 alter table public.snapshots enable row level security;
 
+-- Signed-in users may use the table (row-level security below limits them to their own row).
+-- Newer Supabase projects don't grant this automatically. Signed-out visitors (anon) get nothing.
+grant select, insert, update on table public.snapshots to authenticated;
+revoke all on table public.snapshots from anon;
+
 drop policy if exists "read own snapshot"   on public.snapshots;
 drop policy if exists "insert own snapshot" on public.snapshots;
 drop policy if exists "update own snapshot" on public.snapshots;
