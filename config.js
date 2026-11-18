@@ -3,6 +3,6 @@
 // The anon / publishable key is designed to be public; row-level security in supabase.sql keeps each
 // person's data private to their own account.
 window.SETSBUDDY_CONFIG = {
-  supabaseUrl: '',
-  supabaseKey: ''
+  supabaseUrl: 'https://puypqhzuewlmdgivirad.supabase.co',
+  supabaseKey: 'sb_publishable__ws1K3XkWuZKIQ732PgYLg__0B_5_sW'
 };
