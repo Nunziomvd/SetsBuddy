@@ -23,3 +23,15 @@ python -m http.server 8765
 ```
 
 Then open http://localhost:8765.
+
+## Cloud sync (optional)
+
+Without setup, each device keeps its own data. To sync your phone and computer:
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In the project, open **SQL Editor → New query**, paste the contents of `supabase.sql`, and click **Run**.
+3. Copy the **Project URL** and the **anon / publishable key** (Project Settings → API) into `config.js`.
+4. In the app, open **Track → Account & sync**, create an account, and sign in with it on every device.
+
+The anon key is meant to be public. Row-level security in `supabase.sql` keeps every account's data private.
+Merge rules are documented at the top of `sync.js`. Test them with `node tests/merge-test.js sync.js`.

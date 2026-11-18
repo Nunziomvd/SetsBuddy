@@ -38,10 +38,21 @@ function load() {
   return defaultState();
 }
 let state = load();
-function save() {
+function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch (e) { toast('Could not save on this device'); }
 }
+let lastShared = '';
+function save() {
+  persist();
+  // only wake sync when something that syncs changed (not every keystroke in a live workout)
+  if (typeof Sync === 'undefined' || !Sync.user) return;
+  const { active, ...shared } = state;
+  const now = JSON.stringify(shared);
+  if (now !== lastShared) { lastShared = now; Sync.schedule(); }
+}
+const bury = id => { state.deleted = state.deleted || {}; state.deleted[id] = Date.now(); };
+const touchSettings = () => { state.settingsAt = Date.now(); };
 
 let tab = 'workout';
 let editing = null;   // routine draft being edited
@@ -605,6 +616,8 @@ function viewTrackers() {
       </div>
       <button class="btn outline" style="margin-top:10px;width:100%" data-act="addT">${ic('plus')} Add tracker</button>
     </div>
+    <h2>Account & sync</h2>
+    ${typeof Sync !== 'undefined' ? Sync.cardHTML() : '<div class="card" id="syncCard"></div>'}
     <h2>Settings & backup</h2>
     <div class="card">
       <div class="between setting" style="padding-top:0">
@@ -714,10 +727,31 @@ function logTracker(id) {
   save(); render(); toast(`${t.name} logged`);
 }
 
+async function syncAuth(kind) {
+  const email = $('#syEmail').value.trim(), pass = $('#syPass').value;
+  if (!email || pass.length < 6) { toast('Enter your email and a 6+ character password'); return; }
+  const btns = document.querySelectorAll('#syncCard .btn');
+  btns.forEach(b => (b.disabled = true));
+  try {
+    if (kind === 'up') {
+      const signedIn = await Sync.signUp(email, pass);
+      toast(signedIn ? 'Account created · syncing' : 'Check your email to confirm, then sign in');
+    } else {
+      await Sync.signIn(email, pass);
+      toast('Signed in · syncing');
+    }
+    document.activeElement?.blur();
+  } catch (e) {
+    toast(/fetch|network/i.test(e.message || '') ? "Can't reach the sync server. Check your connection." : (e.message || 'Sign-in failed'));
+  } finally {
+    btns.forEach(b => (b.disabled = false));
+  }
+}
+
 function addTracker() {
   const name = $('#ntName').value.trim();
   if (!name) { $('#ntName').focus(); return; }
-  state.trackers.push({ id: uid(), name, unit: $('#ntUnit').value.trim(), entries: [] });
+  state.trackers.push({ id: uid(), name, unit: $('#ntUnit').value.trim(), entries: [], updatedAt: Date.now() });
   save(); render(); toast('Tracker added');
 }
 
@@ -768,6 +802,7 @@ const actions = {
       .map(e => rx(e.name.trim(), Math.min(20, Math.max(1, parseInt(e.sets, 10) || 1)), String(e.reps).trim(), num(e.rest), e.notes.trim()));
     if (!r.exercises.length) { toast('Add at least one exercise'); return; }
     const { fromWorkout, ...clean } = r;
+    clean.updatedAt = Date.now();
     if (fromWorkout) { const w = state.workouts.find(x => x.id === fromWorkout); if (w) w.routineId = clean.id; }
     const i = state.routines.findIndex(x => x.id === clean.id);
     if (i >= 0) state.routines[i] = clean; else state.routines.push(clean);
@@ -775,7 +810,7 @@ const actions = {
   },
   delRoutine: () => {
     if (!confirm(`Delete the "${editing.name || 'untitled'}" routine? Past workouts stay in History.`)) return;
-    state.routines = state.routines.filter(r => r.id !== editing.id);
+    state.routines = state.routines.filter(r => r.id !== editing.id); bury(editing.id);
     editing = null; tab = 'workout'; save(); render();
   },
   rmEx: el => {
@@ -820,7 +855,7 @@ const actions = {
   discard: () => { if (confirm('Discard this workout?')) { state.active = null; rest.end = 0; save(); render(); } },
   delW: el => {
     if (!confirm('Delete this workout from history?')) return;
-    state.workouts = state.workouts.filter(w => w.id !== el.dataset.id); save(); render();
+    state.workouts = state.workouts.filter(w => w.id !== el.dataset.id); bury(el.dataset.id); save(); render();
   },
   restAdj: el => { rest.end = Math.max(Date.now() + 1000, rest.end + +el.dataset.sec * 1000); tick(); },
   restSkip: () => { rest.end = 0; tick(); },
@@ -829,13 +864,17 @@ const actions = {
   delT: el => {
     const t = state.trackers.find(x => x.id === el.dataset.id);
     if (!confirm(`Delete the "${t.name}" tracker and all its entries?`)) return;
-    state.trackers = state.trackers.filter(x => x.id !== t.id); save(); render();
+    state.trackers = state.trackers.filter(x => x.id !== t.id); bury(t.id); save(); render();
   },
   delE: el => {
     const t = state.trackers.find(x => x.id === el.dataset.id);
-    t.entries = t.entries.filter(e => e.id !== el.dataset.eid); save(); render();
+    t.entries = t.entries.filter(e => e.id !== el.dataset.eid); bury(el.dataset.eid); save(); render();
   },
-  unit: el => { state.unit = el.dataset.u; save(); render(); },
+  unit: el => { state.unit = el.dataset.u; touchSettings(); save(); render(); },
+  syncSignIn: () => syncAuth('in'),
+  syncSignUp: () => syncAuth('up'),
+  syncSignOut: async () => { if (confirm('Sign out? Your data stays on this device.')) await Sync.signOut(); },
+  syncNow: () => Sync.now(),
   export: () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -873,15 +912,15 @@ document.addEventListener('change', e => {
   if (el.dataset.field === 'progEx') { progressEx = el.value; render(); }
   if (el.dataset.field === 'plan') {
     if (!Array.isArray(state.plan)) state.plan = [null, null, null, null, null, null, null];
-    state.plan[+el.dataset.i] = el.value || null; save();
+    state.plan[+el.dataset.i] = el.value || null; touchSettings(); save();
   }
-  if (el.dataset.field === 'restDefault') { state.restDefault = num(el.value); save(); toast(`Default rest ${restLabel(state.restDefault)}`); }
+  if (el.dataset.field === 'restDefault') { state.restDefault = num(el.value); touchSettings(); save(); toast(`Default rest ${restLabel(state.restDefault)}`); }
   if (el.dataset.field === 'import' && el.files[0]) {
     el.files[0].text().then(txt => {
       const data = JSON.parse(txt);
       if (!Array.isArray(data.workouts) || !Array.isArray(data.trackers)) throw new Error('bad file');
       if (!confirm('Replace all current data with this backup?')) return;
-      state = Object.assign(defaultState(), data); save(); render(); toast('Backup restored');
+      state = Object.assign(defaultState(), data); touchSettings(); save(); render(); toast('Backup restored');
     }).catch(() => toast('That file is not a SetsBuddy backup'));
   }
 });

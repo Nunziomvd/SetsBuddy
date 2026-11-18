@@ -321,3 +321,11 @@ body.locked { overflow: hidden; }
 .btn:disabled { opacity: .4; box-shadow: none; cursor: default; }
 @keyframes rise { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes fade { from { opacity: 0; } }
+
+/* sync status */
+.sync-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; background: var(--faint); }
+.sync-dot.synced, .sync-dot.idle { background: var(--volt); box-shadow: 0 0 8px var(--volt); }
+.sync-dot.syncing { background: var(--gold); animation: pulse 1s ease-in-out infinite; }
+.sync-dot.error { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .3; } }
+.stack { display: grid; gap: 8px; }
