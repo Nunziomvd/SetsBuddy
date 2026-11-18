@@ -3,12 +3,7 @@
 
 const KEY = 'setsbuddy-v1';
 const REST_DEFAULT = 90;
-const DEFAULT_EXERCISES = [
-  'Bench Press', 'Incline Dumbbell Press', 'Overhead Press', 'Squat', 'Front Squat', 'Deadlift',
-  'Romanian Deadlift', 'Barbell Row', 'Pull Up', 'Chin Up', 'Lat Pulldown', 'Seated Cable Row',
-  'Dumbbell Curl', 'Tricep Pushdown', 'Lateral Raise', 'Leg Press', 'Leg Curl', 'Leg Extension',
-  'Calf Raise', 'Hip Thrust', 'Lunge', 'Dip', 'Push Up', 'Plank'
-];
+const LIB = typeof EXERCISE_LIBRARY !== 'undefined' ? EXERCISE_LIBRARY : {};
 
 /* ---------- state ---------- */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -21,7 +16,7 @@ const starterRoutines = () => [
     rx('Deadlift', 3, '5', 180), rx('Pull Up', 3, '6-10', 120), rx('Barbell Row', 3, '8-10', 120), rx('Dumbbell Curl', 3, '10-12', 60)] },
   { id: uid(), name: 'Legs', notes: 'Quads, hamstrings, glutes', exercises: [
     rx('Squat', 4, '5-8', 180), rx('Romanian Deadlift', 3, '8-10', 120), rx('Leg Press', 3, '10-12', 90),
-    rx('Leg Curl', 3, '12', 60), rx('Calf Raise', 4, '12-15', 60)] }
+    rx('Lying Leg Curl', 3, '12', 60), rx('Standing Calf Raise', 4, '12-15', 60)] }
 ];
 const defaultState = () => ({
   version: 2,
@@ -30,6 +25,7 @@ const defaultState = () => ({
   workouts: [],      // finished, newest first
   active: null,      // workout in progress
   routines: starterRoutines(),
+  customExercises: [],
   plan: [null, null, null, null, null, null, null], // Mon..Sun: routineId | 'rest' | null
   trackers: [{ id: uid(), name: 'Body weight', unit: 'lb', entries: [] }]
 });
@@ -86,10 +82,136 @@ function exerciseNames() {
   }
   return [...seen.values()];
 }
-function exerciseLibrary() {
-  const names = exerciseNames();
-  const have = new Set(names.map(n => n.toLowerCase()));
-  return names.concat(DEFAULT_EXERCISES.filter(n => !have.has(n.toLowerCase())));
+/* Every exercise the picker knows: built-in library + your custom ones + anything in history/routines. */
+function allExercises() {
+  const out = [], seen = new Set();
+  const add = (name, group) => {
+    const k = name.trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k); out.push({ name: name.trim(), group });
+  };
+  for (const [group, names] of Object.entries(LIB)) names.forEach(n => add(n, group));
+  (state.customExercises || []).forEach(n => add(n, 'Custom'));
+  exerciseNames().forEach(n => add(n, 'Custom'));
+  state.routines.forEach(r => r.exercises.forEach(e => add(e.name, 'Custom')));
+  return out;
+}
+
+/* ---------- exercise picker (bottom sheet) ---------- */
+let picker = null; // { mode: 'workout' | 'routine', q, group, sel: [] }
+const PICK_ALL = 'All', PICK_RECENT = 'Recent';
+
+function pickerGroups() {
+  const groups = [PICK_ALL];
+  if (exerciseNames().length) groups.push(PICK_RECENT);
+  groups.push(...Object.keys(LIB));
+  if (allExercises().some(e => e.group === 'Custom')) groups.push('Custom');
+  return groups;
+}
+
+function pickerItems() {
+  const q = picker.q.trim().toLowerCase();
+  let items = allExercises();
+  if (picker.group === PICK_RECENT) {
+    const recent = exerciseNames().map(n => n.toLowerCase());
+    items = recent.map(k => items.find(e => e.name.toLowerCase() === k)).filter(Boolean);
+  } else if (picker.group !== PICK_ALL) items = items.filter(e => e.group === picker.group);
+  if (q) {
+    const words = q.split(/\s+/);
+    items = items.filter(e => words.every(w => e.name.toLowerCase().includes(w) || e.group.toLowerCase().includes(w)))
+      .sort((a, b) => a.name.toLowerCase().indexOf(q) - b.name.toLowerCase().indexOf(q) || a.name.localeCompare(b.name));
+  }
+  return items;
+}
+
+function pickerListHTML() {
+  const q = picker.q.trim();
+  const items = pickerItems();
+  const isSel = n => picker.sel.some(s => s.toLowerCase() === n.toLowerCase());
+  const exact = q && allExercises().some(e => e.name.toLowerCase() === q.toLowerCase());
+  const row = e => `
+    <button class="pick ${isSel(e.name) ? 'on' : ''}" data-act="pickToggle" data-name="${esc(e.name)}">
+      <span class="pick-box">${isSel(e.name) ? ic('check') : ''}</span>
+      <span class="pick-name">${esc(e.name)}</span>
+      ${picker.group === PICK_ALL || q ? `<span class="pick-group">${esc(e.group)}</span>` : ''}
+    </button>`;
+  let html = '';
+  const create = q && !exact
+    ? `<button class="pick create" data-act="pickCustom">${ic('plus')}<span class="pick-name">Create “${esc(q)}”</span><span class="pick-group">Custom</span></button>` : '';
+  if (create && !items.length) html += create;      // nothing matches: offer it first
+  if (!q && picker.group === PICK_ALL) {
+    // grouped with headers
+    const byGroup = {};
+    items.forEach(e => (byGroup[e.group] = byGroup[e.group] || []).push(e));
+    for (const [g, list] of Object.entries(byGroup)) html += `<div class="pick-h">${esc(g)}</div>` + list.map(e => row({ ...e, group: '' })).join('');
+  } else html += items.map(row).join('');
+  if (create && items.length) html += create;       // matches exist: keep it after them
+  if (!items.length && !q) html += `<p class="muted small" style="padding:16px 4px">Nothing here yet.</p>`;
+  return html;
+}
+
+function refreshPicker() {
+  $('#pickList').innerHTML = pickerListHTML();
+  $('#pickGroups').innerHTML = pickerGroups().map(g =>
+    `<button class="seg-chip ${picker.group === g ? 'on' : ''}" data-act="pickGroup" data-g="${esc(g)}">${esc(g)}</button>`).join('');
+  const n = picker.sel.length, btn = $('#pickDone');
+  btn.disabled = !n;
+  btn.innerHTML = n ? `${ic('plus')} Add ${n} exercise${n > 1 ? 's' : ''}` : 'Select exercises';
+}
+
+function openPicker(mode) {
+  picker = { mode, q: '', group: PICK_ALL, sel: [] };
+  const el = $('#sheet');
+  el.innerHTML = `
+    <div class="sheet-bg" data-act="closePicker"></div>
+    <div class="sheet-panel" role="dialog" aria-label="Add exercises">
+      <div class="sheet-grip"></div>
+      <div class="between"><h3>Add exercises</h3><button class="icon" data-act="closePicker" aria-label="Close">${ic('x')}</button></div>
+      <input id="pickQ" type="search" placeholder="Search, or type any exercise name" autocomplete="off" autocorrect="off" enterkeyhint="done" aria-label="Search exercises">
+      <div class="seg-chips" id="pickGroups"></div>
+      <div class="pick-list" id="pickList"></div>
+      <button class="btn primary big" id="pickDone" data-act="pickDone"></button>
+    </div>`;
+  el.classList.remove('hidden');
+  document.body.classList.add('locked');
+  refreshPicker();
+}
+
+function closePicker() {
+  picker = null;
+  $('#sheet').classList.add('hidden');
+  $('#sheet').innerHTML = '';
+  document.body.classList.remove('locked');
+}
+
+function addCustomFromSearch() {
+  const name = picker.q.trim().replace(/\s+/g, ' ');
+  if (!name) return;
+  const existing = allExercises().find(e => e.name.toLowerCase() === name.toLowerCase());
+  const finalName = existing ? existing.name : name;
+  if (!existing) { state.customExercises = [...(state.customExercises || []), finalName]; save(); }
+  if (!picker.sel.some(s => s.toLowerCase() === finalName.toLowerCase())) picker.sel.push(finalName);
+  picker.q = ''; $('#pickQ').value = '';
+  refreshPicker();
+  toast(existing ? `${finalName} selected` : `${finalName} added to your exercises`);
+}
+
+function applyPicker() {
+  const names = picker.sel;
+  if (picker.mode === 'workout') {
+    names.forEach(name => {
+      const prev = previousSets(name);
+      state.active.exercises.push({ name, sets: Array.from({ length: prev.length || 3 }, () => blankSet()) });
+    });
+    save();
+  } else {
+    const ex = editing.exercises;
+    if (ex.length === 1 && !ex[0].name.trim()) ex.pop(); // replace the empty starter row
+    const last = ex[ex.length - 1];
+    names.forEach(name => ex.push(rx(name, last ? last.sets : 3, last ? last.reps : '8-12', last ? last.rest : (num(state.restDefault) || REST_DEFAULT))));
+  }
+  closePicker(); render();
+  toast(`Added ${names.length} exercise${names.length > 1 ? 's' : ''}`);
 }
 
 let toastTimer;
@@ -272,11 +394,7 @@ function viewWorkout() {
       <input data-field="wnotes" value="${esc(w.notes || '')}" placeholder="How did it feel? (notes)" aria-label="Workout notes" style="margin-top:8px">
     </div>
     ${w.exercises.map(exerciseCard).join('')}
-    <div class="card add-ex">
-      <input id="newEx" list="exlib" placeholder="Add exercise…" autocomplete="off" enterkeyhint="done" aria-label="Exercise name">
-      <datalist id="exlib">${exerciseLibrary().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
-      <button class="btn" data-act="addEx" aria-label="Add exercise">${ic('plus')}</button>
-    </div>
+    <button class="btn big outline" style="margin-bottom:12px" data-act="openPicker" data-mode="workout">${ic('plus')} Add exercises</button>
     <div class="actions">
       <button class="btn ghost danger" data-act="discard">Discard</button>
       <button class="btn primary" data-act="finish">${ic('check')} Finish</button>
@@ -297,7 +415,7 @@ function viewRoutineEdit() {
     ${r.exercises.map((e, i) => `
       <div class="card">
         <div class="ex-head">
-          <input list="exlib" data-field="rex" data-i="${i}" data-key="name" value="${esc(e.name)}" placeholder="Exercise" aria-label="Exercise ${i + 1} name">
+          <input data-field="rex" data-i="${i}" data-key="name" value="${esc(e.name)}" placeholder="Exercise" aria-label="Exercise ${i + 1} name">
           <div class="ex-tools">
             <button class="icon" data-act="rMove" data-i="${i}" data-d="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>${ic('up')}</button>
             <button class="icon" data-act="rMove" data-i="${i}" data-d="1" aria-label="Move down" ${i === r.exercises.length - 1 ? 'disabled' : ''}>${ic('down')}</button>
@@ -313,8 +431,7 @@ function viewRoutineEdit() {
         </div>
         <input data-field="rex" data-i="${i}" data-key="notes" value="${esc(e.notes)}" placeholder="Notes: tempo, cues, machine setting…" aria-label="Exercise notes" style="margin-top:8px">
       </div>`).join('')}
-    <datalist id="exlib">${exerciseLibrary().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
-    <button class="btn outline" style="width:100%;margin-bottom:12px" data-act="rAddEx">${ic('plus')} Add exercise</button>
+    <button class="btn outline" style="width:100%;margin-bottom:12px" data-act="openPicker" data-mode="routine">${ic('plus')} Add exercises</button>
     <div class="actions">
       <button class="btn ghost" data-act="cancelRoutine">Cancel</button>
       <button class="btn primary" data-act="saveRoutine">Save routine</button>
@@ -552,17 +669,6 @@ setInterval(tick, 1000);
 const newWorkout = (name = 'Workout') => ({ id: uid(), name, start: Date.now(), exercises: [] });
 const blankSet = (from) => ({ weight: from?.weight ?? '', reps: from?.reps ?? '', done: false });
 
-function addExercise() {
-  const input = $('#newEx');
-  const name = input && input.value.trim();
-  if (!name) { input && input.focus(); return; }
-  const prev = previousSets(name);
-  const count = prev.length || 3;
-  state.active.exercises.push({ name, sets: Array.from({ length: count }, () => blankSet()) });
-  save(); render();
-  const next = $('#newEx'); if (next) next.scrollIntoView({ block: 'center' });
-}
-
 const carryMeta = e => ({ name: e.name, target: e.target || '', rest: e.rest, notes: e.notes || '' });
 
 function startFromRoutine(r) {
@@ -617,7 +723,17 @@ function addTracker() {
 
 const actions = {
   tab: el => { tab = el.dataset.tab; render(); window.scrollTo(0, 0); },
-  start: () => { state.active = newWorkout(); save(); render(); setTimeout(() => $('#newEx')?.focus(), 50); },
+  start: () => { state.active = newWorkout(); save(); render(); openPicker('workout'); },
+  openPicker: el => openPicker(el.dataset.mode),
+  closePicker,
+  pickToggle: el => {
+    const n = el.dataset.name, i = picker.sel.findIndex(s => s.toLowerCase() === n.toLowerCase());
+    if (i >= 0) picker.sel.splice(i, 1); else picker.sel.push(n);
+    const scroll = $('#pickList').scrollTop; refreshPicker(); $('#pickList').scrollTop = scroll;
+  },
+  pickGroup: el => { picker.group = el.dataset.g; refreshPicker(); $('#pickList').scrollTop = 0; },
+  pickCustom: addCustomFromSearch,
+  pickDone: () => { if (picker.sel.length) applyPicker(); },
   repeat: el => {
     if (state.active && !confirm('Replace the workout in progress?')) return;
     const src = state.workouts.find(w => w.id === el.dataset.id);
@@ -635,13 +751,6 @@ const actions = {
       id: uid(), name: w.name, notes: '', fromWorkout: w.id,
       exercises: w.exercises.map(e => rx(e.name, e.sets.length, e.target || fmtNum(e.sets[0].reps), e.rest ?? state.restDefault, e.notes || ''))
     });
-  },
-  rAddEx: () => {
-    const last = editing.exercises[editing.exercises.length - 1];
-    editing.exercises.push(rx('', last ? last.sets : 3, last ? last.reps : '8-12', last ? last.rest : state.restDefault));
-    render();
-    const inputs = document.querySelectorAll('[data-field=rex][data-key=name]');
-    inputs[inputs.length - 1]?.focus();
   },
   rRmEx: el => { editing.exercises.splice(+el.dataset.i, 1); render(); },
   rMove: el => {
@@ -669,7 +778,6 @@ const actions = {
     state.routines = state.routines.filter(r => r.id !== editing.id);
     editing = null; tab = 'workout'; save(); render();
   },
-  addEx: addExercise,
   rmEx: el => {
     const ex = state.active.exercises[+el.dataset.ex];
     if (ex.sets.some(s => s.done) && !confirm(`Remove ${ex.name}?`)) return;
@@ -745,6 +853,11 @@ document.addEventListener('click', e => {
 
 document.addEventListener('input', e => {
   const el = e.target;
+  if (el.id === 'pickQ' && picker) {
+    picker.q = el.value;
+    $('#pickList').innerHTML = pickerListHTML(); $('#pickList').scrollTop = 0;
+    return;
+  }
   if (el.dataset.field === 'wname') { state.active.name = el.value; save(); }
   if (el.dataset.field === 'wnotes') { state.active.notes = el.value; save(); }
   if (el.dataset.field === 'r') editing[el.dataset.key] = el.value;
@@ -775,7 +888,20 @@ document.addEventListener('change', e => {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
-  if (e.target.id === 'newEx') { e.preventDefault(); addExercise(); }
+  if (e.target.id === 'pickQ' && picker) {
+    // Enter: pick the top match, or create a custom exercise if nothing matches exactly
+    e.preventDefault();
+    const q = picker.q.trim();
+    if (!q) return;
+    const exact = allExercises().find(x => x.name.toLowerCase() === q.toLowerCase());
+    if (exact || !pickerItems().length) addCustomFromSearch();
+    else {
+      const top = pickerItems()[0].name;
+      if (!picker.sel.includes(top)) picker.sel.push(top);
+      picker.q = ''; e.target.value = ''; refreshPicker();
+    }
+    return;
+  }
   const act = e.target.dataset.enter;
   if (act) { e.preventDefault(); actions[act](e.target); }
 });

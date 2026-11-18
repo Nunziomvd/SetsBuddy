@@ -1,6 +1,6 @@
 // Offline support: network first (so updates show up), cache as fallback.
-const CACHE = 'setsbuddy-v2';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.json', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
+const CACHE = 'setsbuddy-v3';
+const SHELL = ['./', 'index.html', 'styles.css', 'exercises.js', 'app.js', 'manifest.json', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', e => {
