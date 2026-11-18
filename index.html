@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>SetsBuddy</title>
+  <meta name="theme-color" content="#0a0b0d">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SetsBuddy">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar"><div class="kicker" id="kicker"></div><h1 id="title">Workout</h1></header>
+  <main id="view"></main>
+
+  <div id="rest" class="rest hidden" role="status">
+    <span><span class="lbl">Rest</span><strong id="restTime">1:30</strong></span>
+    <div>
+      <button class="btn small" data-act="restAdj" data-sec="-15">−15</button>
+      <button class="btn small" data-act="restAdj" data-sec="15">+15</button>
+      <button class="btn small primary" data-act="restSkip">Skip</button>
+    </div>
+    <span class="bar" id="restBar"></span>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <nav class="tabbar">
+    <button data-act="tab" data-tab="workout" aria-label="Workout">
+      <svg class="i" viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>Train</button>
+    <button data-act="tab" data-tab="history" aria-label="History">
+      <svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>History</button>
+    <button data-act="tab" data-tab="progress" aria-label="Progress">
+      <svg class="i" viewBox="0 0 24 24"><path d="M3.5 17.5l5.5-5.5 4 4 7.5-8"/><path d="M15 8h5.5v5.5"/></svg>Progress</button>
+    <button data-act="tab" data-tab="trackers" aria-label="Trackers">
+      <svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></svg>Track</button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
